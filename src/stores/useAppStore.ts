@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from '@/src/lib/supabase';
 
 export type TabId = 'dashboard' | 'calendar' | 'automations' | 'agents' | 'contracts' | 'clients' | 'settings' | 'pipeline' | 'reports';
 
@@ -28,55 +29,14 @@ interface AppState {
   setChatOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   setMobileSidebarOpen: (open: boolean) => void;
+  fetchNotifications: () => Promise<void>;
   addNotification: (n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   deleteNotification: (id: string) => void;
   unreadCount: () => number;
+  logActivity: (action: string, entityType: string, entityId?: string, details?: any) => Promise<void>;
 }
-
-const initialNotifications: Notification[] = [
-  {
-    id: 'n1',
-    type: 'automation',
-    title: 'Automacao executada',
-    message: 'Welcome DM enviou 45 mensagens nas ultimas 2 horas.',
-    timestamp: '2026-03-19T10:30:00',
-    read: false,
-  },
-  {
-    id: 'n2',
-    type: 'contract',
-    title: 'Contrato assinado',
-    message: 'TechFlow Solutions assinou o contrato CTR-2026-001.',
-    timestamp: '2026-03-19T09:15:00',
-    read: false,
-  },
-  {
-    id: 'n3',
-    type: 'lead',
-    title: 'Novo lead qualificado',
-    message: 'Ana Paula demonstrou interesse via Instagram DM.',
-    timestamp: '2026-03-19T08:00:00',
-    read: false,
-  },
-  {
-    id: 'n4',
-    type: 'agent',
-    title: 'Treinamento concluido',
-    message: 'Agente Vendas Pro finalizou re-treinamento com 94% precisao.',
-    timestamp: '2026-03-18T22:00:00',
-    read: true,
-  },
-  {
-    id: 'n5',
-    type: 'system',
-    title: 'Atualizacao do sistema',
-    message: 'Nova versao do OmniMarketing disponivel.',
-    timestamp: '2026-03-18T18:00:00',
-    read: true,
-  },
-];
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -88,7 +48,7 @@ export const useAppStore = create<AppState>()(
       chatOpen: false,
       sidebarOpen: true,
       mobileSidebarOpen: false,
-      notifications: initialNotifications,
+      notifications: [],
       setActiveTab: (tab) => set({ activeTab: tab, mobileSidebarOpen: false }),
       setSearchQuery: (q) => set({ searchQuery: q }),
       setSearchOpen: (open) => set({ searchOpen: open }),
@@ -96,29 +56,87 @@ export const useAppStore = create<AppState>()(
       setChatOpen: (open) => set({ chatOpen: open }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
-      addNotification: (n) => set((state) => ({
-        notifications: [
-          {
-            ...n,
-            id: `n-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            read: false,
-          },
-          ...state.notifications,
-        ],
-      })),
-      markNotificationRead: (id) => set((state) => ({
-        notifications: state.notifications.map((n) =>
-          n.id === id ? { ...n, read: true } : n
-        ),
-      })),
-      markAllNotificationsRead: () => set((state) => ({
-        notifications: state.notifications.map((n) => ({ ...n, read: true })),
-      })),
-      deleteNotification: (id) => set((state) => ({
-        notifications: state.notifications.filter((n) => n.id !== id),
-      })),
+
+      fetchNotifications: async () => {
+        try {
+          const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (error) throw error;
+          if (data) {
+            const mapped: Notification[] = data.map((n: any) => ({
+              id: n.id,
+              type: n.type || 'system',
+              title: n.title,
+              message: n.message || '',
+              timestamp: n.created_at,
+              read: n.read || false,
+            }));
+            set({ notifications: mapped });
+          }
+        } catch (err: any) {
+          console.warn('Supabase notifications fetch failed:', err.message);
+        }
+      },
+
+      addNotification: (n) => {
+        const newNotif: Notification = {
+          ...n,
+          id: 'n-' + Date.now(),
+          timestamp: new Date().toISOString(),
+          read: false,
+        };
+        set((state) => ({
+          notifications: [newNotif, ...state.notifications],
+        }));
+        // Also try to persist to Supabase
+        supabase.from('notifications').insert({
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          read: false,
+        }).then(function(){}, function(){});
+      },
+
+      markNotificationRead: (id) => {
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.id === id ? { ...n, read: true } : n
+          ),
+        }));
+        supabase.from('notifications').update({ read: true }).eq('id', id).then(function(){}, function(){});
+      },
+
+      markAllNotificationsRead: () => {
+        set((state) => ({
+          notifications: state.notifications.map((n) => ({ ...n, read: true })),
+        }));
+        supabase.from('notifications').update({ read: true }).neq('read', true).then(function(){}, function(){});
+      },
+
+      deleteNotification: (id) => {
+        set((state) => ({
+          notifications: state.notifications.filter((n) => n.id !== id),
+        }));
+        supabase.from('notifications').delete().eq('id', id).then(function(){}, function(){});
+      },
+
       unreadCount: () => get().notifications.filter((n) => !n.read).length,
+
+      logActivity: async (action, entityType, entityId, details) => {
+        try {
+          await supabase.from('activity_log').insert({
+            action,
+            entity_type: entityType,
+            entity_id: entityId || null,
+            details: details || {},
+          });
+        } catch (err: any) {
+          console.warn('Activity log failed:', err.message);
+        }
+      },
     }),
     {
       name: 'omni-app-store',

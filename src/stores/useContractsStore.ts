@@ -1,79 +1,138 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from '@/src/lib/supabase';
 
 export interface ContractData {
   id: string;
-  client: string;
+  client_id: string;
+  client?: string; // legacy: client name for display
   service: string;
-  amount: string;
-  date: string;
+  amount: number | string;
+  start_date: string;
+  end_date: string;
   status: 'signed' | 'pending' | 'expired' | 'cancelled';
   description: string;
   terms: string;
+  // legacy compat
+  date?: string;
 }
 
 interface ContractsState {
   contracts: ContractData[];
-  add: (contract: Omit<ContractData, 'id'>) => void;
-  update: (id: string, data: Partial<ContractData>) => void;
-  remove: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+  fetchContracts: () => Promise<void>;
+  add: (contract: Partial<ContractData>) => Promise<void>;
+  update: (id: string, data: Partial<ContractData>) => Promise<void>;
+  remove: (id: string) => Promise<void>;
   getById: (id: string) => ContractData | undefined;
 }
-
-const initialContracts: ContractData[] = [
-  {
-    id: 'CTR-2026-001',
-    client: 'TechFlow Solutions',
-    service: 'Plano Enterprise AI',
-    amount: 'R$ 15.400,00',
-    date: '12 Mar, 2026',
-    status: 'signed',
-    description: 'Implementacao completa de agentes de IA para atendimento e automacao de fluxos internos.',
-    terms: 'Vigencia de 12 meses com renovacao automatica. Suporte 24/7 incluso.',
-  },
-  {
-    id: 'CTR-2026-002',
-    client: 'Gourmet Garden',
-    service: 'Social Media Automation',
-    amount: 'R$ 4.200,00',
-    date: '15 Mar, 2026',
-    status: 'pending',
-    description: 'Gerenciamento automatizado de redes sociais e resposta inteligente a comentarios.',
-    terms: 'Vigencia de 6 meses. Inclui 3 revisoes mensais de estrategia.',
-  },
-  {
-    id: 'CTR-2026-003',
-    client: 'FitLife Academy',
-    service: 'Full Marketing Stack',
-    amount: 'R$ 8.900,00',
-    date: '18 Mar, 2026',
-    status: 'signed',
-    description: 'Pacote completo de marketing digital, automacao de leads e CRM inteligente.',
-    terms: 'Vigencia de 12 meses. Bonus de 50k tokens extras por mes.',
-  },
-];
 
 export const useContractsStore = create<ContractsState>()(
   persist(
     (set, get) => ({
-      contracts: initialContracts,
-      add: (contract) =>
+      contracts: [],
+      loading: false,
+      error: null,
+
+      fetchContracts: async () => {
+        set({ loading: true, error: null });
+        try {
+          const { data, error } = await supabase
+            .from('contracts')
+            .select('*, clients(name)')
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          if (data) {
+            const mapped = data.map((c: any) => ({
+              ...c,
+              client: c.clients?.name || 'N/A',
+              date: c.start_date,
+              amount: typeof c.amount === 'number' ? 'R$ ' + c.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : c.amount,
+            }));
+            set({ contracts: mapped, loading: false });
+          }
+        } catch (err: any) {
+          console.warn('Supabase contracts fetch failed:', err.message);
+          set({ loading: false, error: err.message });
+        }
+      },
+
+      add: async (contract) => {
+        try {
+          const { data, error } = await supabase
+            .from('contracts')
+            .insert({
+              client_id: contract.client_id,
+              service: contract.service || '',
+              amount: typeof contract.amount === 'string'
+                ? parseFloat(contract.amount.replace(/[^0-9.,]/g, '').replace(',', '.')) || 0
+                : contract.amount || 0,
+              start_date: contract.start_date || new Date().toISOString().substring(0, 10),
+              end_date: contract.end_date,
+              status: contract.status || 'pending',
+              description: contract.description || '',
+              terms: contract.terms || '',
+            })
+            .select('*, clients(name)')
+            .single();
+          if (error) throw error;
+          if (data) {
+            const mapped = {
+              ...data,
+              client: data.clients?.name || contract.client || 'N/A',
+              date: data.start_date,
+              amount: 'R$ ' + Number(data.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+            };
+            set((state) => ({ contracts: [mapped, ...state.contracts] }));
+          }
+        } catch (err: any) {
+          const newContract: ContractData = {
+            id: 'CTR-' + Date.now(),
+            client_id: contract.client_id || '',
+            client: contract.client || '',
+            service: contract.service || '',
+            amount: contract.amount || 'R$ 0,00',
+            start_date: contract.start_date || new Date().toISOString().substring(0, 10),
+            end_date: contract.end_date || '',
+            status: (contract.status as any) || 'pending',
+            description: contract.description || '',
+            terms: contract.terms || '',
+            date: contract.start_date || new Date().toLocaleDateString('pt-BR'),
+          };
+          set((state) => ({ contracts: [newContract, ...state.contracts] }));
+          console.warn('Added contract locally:', err.message);
+        }
+      },
+
+      update: async (id, data) => {
+        try {
+          const updateData: any = { ...data };
+          delete updateData.client;
+          delete updateData.date;
+          if (typeof updateData.amount === 'string') {
+            updateData.amount = parseFloat(updateData.amount.replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+          }
+          const { error } = await supabase.from('contracts').update(updateData).eq('id', id);
+          if (error) throw error;
+        } catch (err: any) {
+          console.warn('Supabase contract update failed:', err.message);
+        }
         set((state) => ({
-          contracts: [
-            ...state.contracts,
-            { ...contract, id: `CTR-2026-${String(state.contracts.length + 1).padStart(3, '0')}` },
-          ],
-        })),
-      update: (id, data) =>
-        set((state) => ({
-          contracts: state.contracts.map((c) =>
-            c.id === id ? { ...c, ...data } : c
-          ),
-        })),
-      remove: (id) =>
-        set((state) => ({
-          contracts: state.contracts.filter((c) => c.id !== id),
-        })),
+          contracts: state.contracts.map((c) => (c.id === id ? { ...c, ...data } : c)),
+        }));
+      },
+
+      remove: async (id) => {
+        try {
+          const { error } = await supabase.from('contracts').delete().eq('id', id);
+          if (error) throw error;
+        } catch (err: any) {
+          console.warn('Supabase contract delete failed:', err.message);
+        }
+        set((state) => ({ contracts: state.contracts.filter((c) => c.id !== id) }));
+      },
+
       getById: (id) => get().contracts.find((c) => c.id === id),
     }),
     { name: 'omni-contracts-store' }

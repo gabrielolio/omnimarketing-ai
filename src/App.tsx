@@ -11,12 +11,35 @@ import { Pipeline } from "./components/Pipeline";
 import { Reports } from "./components/Reports";
 import { ChatAssistant } from "./components/ChatAssistant";
 import { NotificationsPanel } from "./components/Notifications";
+import { Login } from "./components/Login";
 import { motion, AnimatePresence } from "motion/react";
 import { useAppStore } from "./stores/useAppStore";
+import { useAuth, AuthProvider } from "./lib/auth";
+import { useDataInit } from "./lib/useDataInit";
 import { Toaster } from "sonner";
+import { Loader2 } from "lucide-react";
 
-export default function App() {
+function AppContent() {
   const { activeTab, chatOpen, setChatOpen, notificationsOpen, setNotificationsOpen } = useAppStore();
+  const { user, loading } = useAuth();
+
+  // Initialize all data when user is authenticated
+  useDataInit();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 size={32} className="text-emerald-500 animate-spin" />
+          <p className="text-zinc-500 text-sm">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   const renderContent = () => {
     switch (activeTab) {
@@ -50,7 +73,6 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-200 font-sans selection:bg-emerald-500/30">
-      <Toaster position="top-right" theme="dark" richColors />
       <Sidebar />
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <Header title={getTitle()} />
@@ -71,5 +93,14 @@ export default function App() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 10h.01" /><path d="M12 10h.01" /><path d="M16 10h.01" /></svg>
       </motion.button>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Toaster position="top-right" theme="dark" richColors />
+      <AppContent />
+    </AuthProvider>
   );
 }

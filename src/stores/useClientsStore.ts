@@ -1,101 +1,130 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from '@/src/lib/supabase';
+import { toast } from 'sonner';
 
 export interface ClientData {
   id: string;
   name: string;
   email: string;
-  projects: number;
-  status: 'active' | 'inactive';
-  revenue: string;
-  avatar: string;
   phone: string;
-  joined: string;
-  lastActive: string;
+  avatar_url: string;
+  status: 'active' | 'inactive';
+  health: 'green' | 'yellow' | 'red';
+  instagram: string;
+  city: string;
+  state: string;
+  contact_name: string;
   notes: string;
+  joined_at: string;
+  // legacy compat
+  avatar?: string;
+  projects?: number;
+  revenue?: string;
+  joined?: string;
+  lastActive?: string;
 }
 
 interface ClientsState {
   clients: ClientData[];
-  add: (client: Omit<ClientData, 'id'>) => void;
-  update: (id: string, data: Partial<ClientData>) => void;
-  remove: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+  fetchClients: () => Promise<void>;
+  add: (client: Partial<ClientData>) => Promise<void>;
+  update: (id: string, data: Partial<ClientData>) => Promise<void>;
+  remove: (id: string) => Promise<void>;
   getById: (id: string) => ClientData | undefined;
 }
-
-const initialClients: ClientData[] = [
-  {
-    id: 'cli-1',
-    name: 'TechFlow Solutions',
-    email: 'contact@techflow.com',
-    projects: 3,
-    status: 'active',
-    revenue: 'R$ 15.400',
-    avatar: 'https://picsum.photos/seed/tech/100/100',
-    phone: '+55 11 99999-9999',
-    joined: 'Jan 2026',
-    lastActive: 'Ha 2 horas',
-    notes: 'Cliente focado em ROI imediato. Prefere relatorios quinzenais via WhatsApp.',
-  },
-  {
-    id: 'cli-2',
-    name: 'Gourmet Garden',
-    email: 'marketing@gourmet.io',
-    projects: 1,
-    status: 'active',
-    revenue: 'R$ 4.200',
-    avatar: 'https://picsum.photos/seed/food/100/100',
-    phone: '+55 11 88888-8888',
-    joined: 'Fev 2026',
-    lastActive: 'Ha 5 horas',
-    notes: '',
-  },
-  {
-    id: 'cli-3',
-    name: 'Blue Horizon Travel',
-    email: 'info@bluehorizon.com',
-    projects: 5,
-    status: 'inactive',
-    revenue: 'R$ 0',
-    avatar: 'https://picsum.photos/seed/travel/100/100',
-    phone: '+55 11 77777-7777',
-    joined: 'Mar 2026',
-    lastActive: 'Ha 2 dias',
-    notes: '',
-  },
-  {
-    id: 'cli-4',
-    name: 'FitLife Academy',
-    email: 'admin@fitlife.br',
-    projects: 2,
-    status: 'active',
-    revenue: 'R$ 8.900',
-    avatar: 'https://picsum.photos/seed/fit/100/100',
-    phone: '+55 11 66666-6666',
-    joined: 'Jan 2026',
-    lastActive: 'Ha 12 horas',
-    notes: '',
-  },
-];
 
 export const useClientsStore = create<ClientsState>()(
   persist(
     (set, get) => ({
-      clients: initialClients,
-      add: (client) =>
+      clients: [],
+      loading: false,
+      error: null,
+
+      fetchClients: async () => {
+        set({ loading: true, error: null });
+        try {
+          const { data, error } = await supabase
+            .from('clients')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          if (data) set({ clients: data, loading: false });
+        } catch (err: any) {
+          console.warn('Supabase fetch failed, using local data:', err.message);
+          set({ loading: false, error: err.message });
+        }
+      },
+
+      add: async (client) => {
+        try {
+          const { data, error } = await supabase
+            .from('clients')
+            .insert({
+              name: client.name || '',
+              email: client.email || '',
+              phone: client.phone || '',
+              avatar_url: client.avatar_url || client.avatar || 'https://picsum.photos/seed/' + Date.now() + '/100/100',
+              status: client.status || 'active',
+              health: client.health || 'green',
+              instagram: client.instagram || '',
+              city: client.city || '',
+              state: client.state || '',
+              contact_name: client.contact_name || '',
+              notes: client.notes || '',
+            })
+            .select()
+            .single();
+          if (error) throw error;
+          if (data) {
+            set((state) => ({ clients: [data, ...state.clients] }));
+          }
+        } catch (err: any) {
+          // Fallback: add locally
+          const newClient: ClientData = {
+            id: 'cli-' + Date.now(),
+            name: client.name || '',
+            email: client.email || '',
+            phone: client.phone || '',
+            avatar_url: client.avatar_url || client.avatar || 'https://picsum.photos/seed/' + Date.now() + '/100/100',
+            status: (client.status as any) || 'active',
+            health: (client.health as any) || 'green',
+            instagram: client.instagram || '',
+            city: client.city || '',
+            state: client.state || '',
+            contact_name: client.contact_name || '',
+            notes: client.notes || '',
+            joined_at: new Date().toISOString(),
+          };
+          set((state) => ({ clients: [newClient, ...state.clients] }));
+          console.warn('Added client locally:', err.message);
+        }
+      },
+
+      update: async (id, data) => {
+        try {
+          const { error } = await supabase.from('clients').update(data).eq('id', id);
+          if (error) throw error;
+        } catch (err: any) {
+          console.warn('Supabase update failed, updating locally:', err.message);
+        }
         set((state) => ({
-          clients: [...state.clients, { ...client, id: `cli-${Date.now()}` }],
-        })),
-      update: (id, data) =>
-        set((state) => ({
-          clients: state.clients.map((c) =>
-            c.id === id ? { ...c, ...data } : c
-          ),
-        })),
-      remove: (id) =>
-        set((state) => ({
-          clients: state.clients.filter((c) => c.id !== id),
-        })),
+          clients: state.clients.map((c) => (c.id === id ? { ...c, ...data } : c)),
+        }));
+      },
+
+      remove: async (id) => {
+        try {
+          const { error } = await supabase.from('clients').delete().eq('id', id);
+          if (error) throw error;
+        } catch (err: any) {
+          console.warn('Supabase delete failed, removing locally:', err.message);
+        }
+        set((state) => ({ clients: state.clients.filter((c) => c.id !== id) }));
+      },
+
       getById: (id) => get().clients.find((c) => c.id === id),
     }),
     { name: 'omni-clients-store' }

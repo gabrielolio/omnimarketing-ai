@@ -1,10 +1,12 @@
 import React, { useState } from "react";
-import { User, Bell, Palette, Info, Save, Plug } from "lucide-react";
+import { User, Bell, Palette, Info, Save, Plug, LogOut } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/src/types";
 import { toast } from "sonner";
+import { useAuth } from "@/src/lib/auth";
 
 export const Settings = () => {
+  const { signOut, user, profile: authProfile } = useAuth();
   const [activeSection, setActiveSection] = useState("profile");
   const [profile, setProfile] = useState({ name: "Gabriel Oliveira", email: "gabriel@aiox.com.br", role: "Administrador" });
   const [prefs, setPrefs] = useState({ theme: "dark" as string, language: "pt-BR", emailNotifications: true, pushNotifications: true, weeklyReport: true });
@@ -21,6 +23,7 @@ export const Settings = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-bold text-zinc-100">Configuracoes</h2><p className="text-sm text-zinc-500">Gerencie seu perfil e preferencias</p></div>
+        <button onClick={async () => { await signOut(); toast.success("Desconectado!"); }} className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-2.5 rounded-xl font-medium transition-all"><LogOut size={18} /> Sair</button>
         <button onClick={() => toast.success("Configuracoes salvas!")} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-500/20"><Save size={18} /> Salvar</button>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -79,7 +82,7 @@ export const Settings = () => {
             )}
             {activeSection === "about" && (
               <div className="space-y-6"><h3 className="text-lg font-bold text-zinc-100">Sobre o Sistema</h3>
-                <div className="space-y-4">{[{l:"Aplicacao",v:"OmniMarketing AI"},{l:"Versao",v:"1.0.0-beta"},{l:"Por",v:"AIOX Agency"},{l:"Stack",v:"React 19 + Vite + Tailwind 4 + Zustand"}].map(i => (
+                <div className="space-y-4">{[{l:"Aplicacao",v:"OmniMarketing AI"},{l:"Versao",v:"1.1.0"},{l:"Por",v:"AIOX Agency"},{l:"Stack",v:"React 19 + Vite + Tailwind 4 + Zustand + Supabase"}].map(i => (
                   <div key={i.l} className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl"><p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1">{i.l}</p><p className="text-sm text-zinc-200">{i.v}</p></div>
                 ))}</div>
               </div>
